@@ -1,0 +1,164 @@
+---
+title: "The largest impact events in the NOAA's STORM Data"
+author: "David.Peng"
+date: "Oct 21, 2014"
+output: html_document
+---
+
+####Synopsis
+We are vulnerable to the various natural disasters. One way to help people is by insurance. By often it is very hard to quantify the impacts of the rarely happened natural disasters. In this report, I propose a emthod trying to quantify the level of harmness of different events by analysizing the NOAA's STORM data since 1996. I used the 48 standard event types from the NOAA STORM data websites to clean and classify the data. The attached two plots are to show: 1) The type of events with most impact to population; 2) The type of event with most economic impact. In the future work, some detailed analysis could be done by associating events and harmness to the geographical/temporal distributions and etc.
+
+####Methods
+From the descriptions of the [NOAA's website](http://www.ncdc.noaa.gov/stormevents/details.jsp?type=eventtype)  there are 48 types of well documented events data, detailed in Table 1 of Section 2.1.1 in the document [NWS Directive 10-1605](http://www.nws.noaa.gov/directives/sym/pd01016005curr.pdf), whose names are extracted from the pdf and stored seperately in a file called "events.txt". Assuming events happened since 1996 have all been well documented, it is fair to compare them for the whole country for the same amount of time span by the same metric I will define immediately. 
+
+To simplify the problem to get some qualitative results, I used the sum of the two columns of "fatalities" and "injuries" as the metric to quantify the impacts to the population. The quantity means the total number of impacted people, including fatalies and injuries. And I used the property damages and crops damages to represent the total economic loss. 
+
+####Data processing
+```{r, cache=TRUE, echo=FALSE}
+data <- read.csv("storm.csv", header = T, stringsAsFactors = F,  sep = ",", na.strings = "")
+id<- as.Date(data$BGN_DATE, format="%m/%d/%Y") > as.Date("12/31/1995", format="%m/%d/%Y")
+newdata <- data[id,c("EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")]
+
+#extract the recorded event type list
+evlist <- tolower(newdata$EVTYPE)
+evtype <- unique(evlist)
+#calculate event count and  metric phi
+phi <- newdata$FATALITIES + newdata$INJURIES
+cnt <- lapply(evtype, function(x) {ii<-evlist == x; c(sum(ii), sum(phi[ii]), mean(phi[ii]))})
+cnt <- data.frame(t(matrix(unlist(cnt), nrow = 3, ncol = 438)), stringsAsFactors = F)
+cnt$event <- evtype
+names(cnt) <- c("count", "total", "mean", "event")
+
+```
+A common problem in the data processing is that the data are not consistent. Such as in this data set, the same event are recorded with different names, which are not found in the dictionary. This happened when the data input/recording rules are not followed well, or in other cases when lacks a comon rules such as the sentiment of the texts of the social network data sets. Here is an example of different ways that "thunderstorm" are recorded
+```{r, cache=TRUE, echo=FALSE}
+eventtable <- tolower(readLines("events.txt"))
+```
+```{r, cache=TRUE, echo=FALSE}
+grep("^ ?tstm$|^tstm w|^ *thunderstorm", x = evtype, value = T)
+```
+There are several ways to clean this up. I try to use a simple method by choosing the top 40 items will weigh over 95% over all the data. Since we have used the majority of the data (95.11% of the events and 98.62% of impacted people, the drop ones are hard to compromise my conclusion. The rest ones could be dealed with by hand. Here is the final list of unmatched events which will be corrected by hands, compared with the original 400 unmatched event types:
+```{r, cache=TRUE, echo=FALSE}
+cnt <- cnt[order(-cnt[,2]),]
+#c(sum(cnt[1:40, 1])/sum(cnt[,1])*100,  sum(cnt[1:40, 2])/sum(cnt[,2])*100)
+```
+
+```{r, cache=TRUE, echo=FALSE}
+newcnt <- cnt[1:40, ]
+newcnt$matched <- unlist(lapply(newcnt[,4], function(x) x%in%eventtable))
+
+newcnt$event[!newcnt$matched]
+unmatched<-newcnt[!newcnt$matched,]
+matched<-newcnt[newcnt$matched,]
+```
+
+```{r,cache=TRUE, echo=FALSE}
+changename<-c("thunderstorm wind", "hurricane (typhoon)", "fog", "wildfire", 
+              "rip current", "glaze", "extreme cold/wind chill", "urban/sml stream fld",
+              "hurricane (typhoon)", "wind", "thunderstorm wind", "winter weather",
+              "high surf", "landslide")
+#a double check
+#cbind(unmatched$event, changename, unlist(lapply(changename, function(x)x %in% eventtable)))
+```
+
+```{r, cache=TRUE, echo=FALSE}
+unmatched$event <- changename
+unmatched$matched <- unlist(lapply(changename, function(x)x %in% matched$event) )
+
+for (i in 1:nrow(unmatched)){
+    ii <- if (unmatched[i, 4] %in% matched$event) which(unmatched[i, 4] == matched$event) else 0
+    #for matched ones, add into the matched dataframe
+    if(ii>0) {matched[ii, 1] = matched[ii, 1] + unmatched[i, 1]
+              matched[ii, 2] = matched[ii, 2] + unmatched[i, 2]
+              matched[ii, 3] = matched[ii, 2] / matched[ii, 1]
+    }else { matched<-rbind(matched, unmatched[i,])}
+    #for the still unmatched ones in unmatched, just insert into the matched dataframe
+}
+newcnt1 <- matched[order(-matched[, 2]), 1:4]
+```
+
+```{r, cache=TRUE,echo=FALSE}
+ndata<- newdata[!is.na(newdata$PROPDMGEXP) | !is.na(newdata$CROPDMGEXP),-c(2,3)]
+
+#fill NA's with 0
+
+ndata[, 3] <- tolower(ndata[, 3])
+ndata[, 5] <- tolower(ndata[, 5])
+
+```
+```{r,cache=TRUE, echo=FALSE}
+ndata$prop <- 0
+ndata$prop[ndata[,3] == "0"] <- 1
+ndata$prop[ndata[,3] == "k"] <- 1.e3
+ndata$prop[ndata[,3] == "m"] <- 1.e6
+ndata$prop[ndata[,3] == "b"] <- 1.e9
+ndata$prop <- ndata[,2]*ndata$prop
+ndata$crop <- 0
+ndata$crop[ndata[,5] == "0"] <- 1
+ndata$crop[ndata[,5] == "k"] <- 1.e3
+ndata$crop[ndata[,5] == "m"] <- 1.e6
+ndata$crop[ndata[,5] == "b"] <- 1.e9
+ndata$crop <- ndata[,4]*ndata$crop
+ndata$cost <- ndata$prop + ndata$crop
+ndata <- ndata[, c(1,8)]
+```
+
+```{r,cache=TRUE, echo=FALSE}
+#extract the recorded event type list
+evlist <- tolower(ndata[,1])
+evtype <- unique(evlist)
+#calculate event count and  total and mean cost for each event
+cnt <- lapply(evtype, function(x) {ii<-evlist == x; c(sum(ii), sum(ndata$cost[ii]), mean(ndata$cost[ii]))})
+cnt <- data.frame(t(matrix(unlist(cnt), nrow = 3, ncol = 157)), stringsAsFactors = F)
+cnt$event <- evtype
+names(cnt) <- c("count", "total", "mean", "event")
+```
+
+```{r, cache=TRUE, echo=FALSE}
+cnt <- cnt[order(-cnt[,2]),]
+#head(cnt, 20)
+#c(sum(cnt[1:20, 1])/sum(cnt[,1])*100,  sum(cnt[1:20, 2])/sum(cnt[,2])*100)
+```
+
+```{r, cache=TRUE,echo=FALSE}
+newcnt <- cnt[1:20, ]
+newcnt$matched <- unlist(lapply(newcnt[,4], function(x) x%in%eventtable))
+
+#newcnt$event[!newcnt$matched]
+unmatched<-newcnt[!newcnt$matched,]
+matched<-newcnt[newcnt$matched,]
+
+changename<-c("hurricane (typhoon)", "storm surge/tide", "hurricane (typhoon)", 
+              "thunderstorm wind", "wildfire", "extreme cold/wind chill")
+#cbind(unmatched$event, changename, unlist(lapply(changename, function(x)x %in% eventtable)))
+
+unmatched$event <- changename
+unmatched$matched <- unlist(lapply(changename, function(x)x %in% matched$event) )
+
+for (i in 1:nrow(unmatched)){
+    ii <- if (unmatched[i, 4] %in% matched$event) which(unmatched[i, 4] == matched$event) else 0
+    #for matched ones, add into the matched dataframe
+    if(ii>0) {matched[ii, 1] = matched[ii, 1] + unmatched[i, 1]
+              matched[ii, 2] = matched[ii, 2] + unmatched[i, 2]
+              matched[ii, 3] = matched[ii, 2] / matched[ii, 1]
+    }else { matched<-rbind(matched, unmatched[i,])}
+    #for the still unmatched ones in unmatched, just insert into the matched dataframe
+}
+newcnt2 <- matched[order(-matched[, 2]), 1:4]
+```
+####Plots
+Below are the two plots of the top 5 types of events with highest population and economic impacts.
+```{r,cache=TRUE, echo=FALSE}
+newcnt1 <- newcnt1[1:5, ]
+
+require(gridExtra)
+require(ggplot2)
+ggplot(data = newcnt1, aes(x=event, y= total)) + geom_bar(stat = "identity") + ylab("Total impact people") + ggtitle("Top 5 events") 
+
+
+newcnt2 <- newcnt2[1:5, ]
+
+ggplot(data = newcnt2, aes(x=event, y= total*1.e-9)) + geom_bar(stat = "identity") + ylab("Total loss in billion USD") + ggtitle("Top 5 events") 
+#grid.arrange(plot1, plot2, ncol=2)
+```
+
